@@ -242,6 +242,11 @@ function tempoRelativoCC(iso) {
   return `há ${Math.round(diffMin / 60)}h`;
 }
 
+function linkReenviarWhatsApp(telefone) {
+  const mensagem = `Olá! 🎉 Seja muito bem-vinda!\n\nFico muito feliz que sua assinatura foi confirmada. O seu teste de 7 dias já está valendo!\n\nPara começar a usar, é só acessar seu painel por aqui:\nhttps://painel.appdecore.com.br\n\nTambém te convido a entrar no nosso grupo de novidades para não perder nada:\nhttps://chat.whatsapp.com/ByP3G7q0ylu9VRfW2SsTk7\n\nSe precisar de qualquer ajuda, é só me chamar. Aproveite bastante! 💗`;
+  return `https://wa.me/${telefone}?text=${encodeURIComponent(mensagem)}`;
+}
+
 function SinalServico({ status }) {
   const cor = status === "ok" ? BRAND.turquesa : status === "erro" ? BRAND.rosa : "#CBD5E1";
   return (
@@ -334,9 +339,14 @@ function CentralControle() {
                 <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{l.telefone || "—"}</p>
                 <p className="text-xs text-slate-400 truncate">{l.evento} {l.motivo ? `· ${l.motivo}` : ""}</p>
               </div>
-              <div className="text-right shrink-0">
-                <Pill color={l.sucesso ? BRAND.turquesa : BRAND.rosa}>{l.sucesso ? "Enviado" : "Falhou"}</Pill>
-                <p className="text-[11px] text-slate-400 mt-1">{tempoRelativoCC(l.criado_em)}</p>
+              <div className="flex items-center gap-3 shrink-0">
+                {!l.sucesso && l.telefone && (
+                  <a href={linkReenviarWhatsApp(l.telefone)} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white" style={{ background: BRAND.turquesa }}>Reenviar</a>
+                )}
+                <div className="text-right">
+                  <Pill color={l.sucesso ? BRAND.turquesa : BRAND.rosa}>{l.sucesso ? "Enviado" : "Falhou"}</Pill>
+                  <p className="text-[11px] text-slate-400 mt-1">{tempoRelativoCC(l.criado_em)}</p>
+                </div>
               </div>
             </div>
           ))}
