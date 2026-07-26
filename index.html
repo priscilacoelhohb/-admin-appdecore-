@@ -229,6 +229,125 @@ function Relatorios() {
 const TIPO_SERVICO_LABELS_ADMIN = { pegue_monte: "Pegue e Monte", decoracao: "Decoração", baloes: "Balões", pecas_avulsas: "Peças avulsas" };
 
 /* ============================================================
+   CENTRAL DE CONTROLE (status dos serviços + planos + logs WhatsApp)
+============================================================ */
+const NOME_SERVICO_CC = { site_landpage: "LandPage", site_painel: "Painel", whatsapp_waha: "WhatsApp", supabase: "Supabase" };
+const ORDEM_SERVICO_CC = ["site_landpage", "site_painel", "whatsapp_waha", "supabase"];
+
+function tempoRelativoCC(iso) {
+  if (!iso) return "sem dado";
+  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (diffMin < 1) return "agora mesmo";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  return `há ${Math.round(diffMin / 60)}h`;
+}
+
+function SinalServico({ status }) {
+  const cor = status === "ok" ? BRAND.turquesa : status === "erro" ? BRAND.rosa : "#CBD5E1";
+  return (
+    <span className="relative inline-flex h-2.5 w-2.5 shrink-0">
+      {status && (
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-40" style={{ background: cor }}></span>
+      )}
+      <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: cor }}></span>
+    </span>
+  );
+}
+
+function CentralControle() {
+  const [status, setStatus] = useState(null);
+  const [planos, setPlanos] = useState(null);
+  const [logs, setLogs] = useState(null);
+  const [filtroLog, setFiltroLog] = useState("todos");
+  const [erro, setErro] = useState("");
+
+  async function carregar() {
+    const [rStatus, rPlanos, rLogs] = await Promise.all([
+      sb.from("status_sistema").select("*"),
+      sb.from("resumo_planos").select("*"),
+      sb.from("logs_whatsapp").select("*").order("criado_em", { ascending: false }).limit(50),
+    ]);
+    if (rStatus.error || rPlanos.error || rLogs.error) {
+      setErro((rStatus.error && rStatus.error.message) || (rPlanos.error && rPlanos.error.message) || (rLogs.error && rLogs.error.message));
+    }
+    setStatus(rStatus.data || []);
+    setPlanos(rPlanos.data || []);
+    setLogs(rLogs.data || []);
+  }
+
+  useEffect(() => {
+    carregar();
+    const intervalo = setInterval(carregar, 60000);
+    return () => clearInterval(intervalo);
+  }, []);
+
+  if (erro) return <div className="text-sm font-semibold px-4 py-3 rounded-xl" style={{ background: BRAND.rosa + "15", color: BRAND.rosa }}>⚠️ {erro}</div>;
+  if (!status || !planos || !logs) return <div className="text-center py-10 text-slate-400">Carregando central de controle...</div>;
+
+  const porServico = Object.fromEntries(status.map((s) => [s.servico, s]));
+  const mrr = planos.reduce((acc, p) => acc + (Number(p.valor_estimado) || 0), 0);
+  const logsFiltrados = logs.filter((l) => filtroLog === "todos" ? true : filtroLog === "sucesso" ? l.sucesso === true : l.sucesso === false);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {ORDEM_SERVICO_CC.map((chave) => {
+          const s = porServico[chave];
+          return (
+            <div key={chave} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3">
+              <SinalServico status={s ? s.status : null} />
+              <div className="min-w-0">
+                <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>{NOME_SERVICO_CC[chave]}</p>
+                <p className="text-xs text-slate-400 truncate" title={s ? s.detalhes : ""}>{s ? `${s.detalhes || (s.status === "ok" ? "Tudo certo" : "Falha")} · ${tempoRelativoCC(s.verificado_em)}` : "sem dado ainda"}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="rounded-2xl p-4 shadow-sm text-white lg:col-span-1" style={{ background: `linear-gradient(120deg, ${BRAND.rosa}, ${BRAND.roxo})` }}>
+          <p className="text-xs font-bold uppercase opacity-80">MRR estimado</p>
+          <p className="text-2xl font-extrabold mt-1">{formatBRL(mrr)}</p>
+        </div>
+        {planos.filter((p) => p.plano_status).sort((a, b) => b.quantidade - a.quantidade).map((p) => (
+          <div key={p.plano_status} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+            <p className="text-xs font-bold uppercase" style={{ color: STATUS_CORES[p.plano_status] || BRAND.tinta }}>{STATUS_LABELS[p.plano_status] || p.plano_status}</p>
+            <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{p.quantidade}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>Envios de WhatsApp recentes</p>
+          <div className="flex gap-2">
+            {[["todos", "Todos"], ["sucesso", "Só sucesso"], ["falha", "Só falhas"]].map(([v, label]) => (
+              <button key={v} onClick={() => setFiltroLog(v)} className="px-3 py-1 rounded-full text-xs font-bold cursor-pointer" style={filtroLog === v ? { background: BRAND.azul, color: "#fff" } : { background: "#F1F3FA", color: BRAND.tinta }}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1 max-h-96 overflow-y-auto">
+          {logsFiltrados.map((l) => (
+            <div key={l.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{l.telefone || "—"}</p>
+                <p className="text-xs text-slate-400 truncate">{l.evento} {l.motivo ? `· ${l.motivo}` : ""}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <Pill color={l.sucesso ? BRAND.turquesa : BRAND.rosa}>{l.sucesso ? "Enviado" : "Falhou"}</Pill>
+                <p className="text-[11px] text-slate-400 mt-1">{tempoRelativoCC(l.criado_em)}</p>
+              </div>
+            </div>
+          ))}
+          {logsFiltrados.length === 0 && <p className="text-sm text-slate-400 py-4 text-center">Nenhum envio encontrado.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    APP PRINCIPAL DO ADMIN
 ============================================================ */
 /* ============================================================
@@ -379,8 +498,9 @@ function AdminApp() {
           <button onClick={() => setAba("decoradoras")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "decoradoras" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Decoradoras</button>
           <button onClick={() => setAba("relatorios")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "relatorios" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Relatórios</button>
           <button onClick={() => setAba("configuracoes")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "configuracoes" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Configurações</button>
+          <button onClick={() => setAba("central")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "central" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Central de Controle</button>
         </div>
-        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : <ConfiguracoesTab />}
+        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : aba === "central" ? <CentralControle /> : <ConfiguracoesTab />}
       </div>
     </div>
   );
