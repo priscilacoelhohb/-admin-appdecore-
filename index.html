@@ -259,25 +259,59 @@ function SinalServico({ status }) {
   );
 }
 
+const MOTIVO_FALHA_LABELS = {
+  insufficient_funds: "Saldo insuficiente",
+  card_declined: "Cartão recusado",
+  generic_decline: "Recusado pelo banco",
+  expired_card: "Cartão vencido",
+  incorrect_cvc: "CVC incorreto",
+  processing_error: "Erro ao processar",
+  incorrect_number: "Número do cartão incorreto",
+  authentication_required: "Banco pediu confirmação (3D Secure)",
+};
+
+function linkPlanoDecoradora(d) {
+  return d.plano_tipo === "premium"
+    ? "https://buy.stripe.com/4gM5kwgoRh1I7Z57HdfQI08"
+    : "https://buy.stripe.com/dRm4gsdcFfXE7Z51iPfQI07";
+}
+
+function linkCobrancaWhatsApp(d, motivo) {
+  const link = `${linkPlanoDecoradora(d)}?prefilled_email=${encodeURIComponent(d.email || "")}`;
+  const mensagens = {
+    trial: `Oi! 😊 Vi aqui que seu teste grátis do AppDecore está acabando. Pra continuar usando sem perder nada do seu painel, é só assinar por aqui:\n${link}\n\nQualquer dúvida, me chama!`,
+    bloqueada: `Oi! Seu acesso ao AppDecore está pausado no momento. Quer reativar? É só assinar por aqui:\n${link}\n\nQualquer dúvida, me chama!`,
+    falha: `Oi! Vi que seu pagamento do AppDecore não passou. Pra regularizar e continuar usando seu painel, é só assinar de novo por aqui:\n${link}\n\nQualquer dúvida, me chama!`,
+  };
+  const telefone = (d.whatsapp_contato || "").replace(/\D/g, "");
+  return `https://wa.me/${telefone}?text=${encodeURIComponent(mensagens[motivo] || mensagens.falha)}`;
+}
+
 function CentralControle() {
   const [status, setStatus] = useState(null);
   const [planos, setPlanos] = useState(null);
   const [logs, setLogs] = useState(null);
+  const [decoradoras, setDecoradoras] = useState(null);
+  const [falhas, setFalhas] = useState(null);
   const [filtroLog, setFiltroLog] = useState("todos");
+  const [statusAberto, setStatusAberto] = useState(null); // 'trial' | 'bloqueada' | null
   const [erro, setErro] = useState("");
 
   async function carregar() {
-    const [rStatus, rPlanos, rLogs] = await Promise.all([
+    const [rStatus, rPlanos, rLogs, rDecoradoras, rFalhas] = await Promise.all([
       sb.from("status_sistema").select("*"),
       sb.from("resumo_planos").select("*"),
       sb.from("logs_whatsapp").select("*").order("criado_em", { ascending: false }).limit(50),
+      sb.from("decoradoras").select("id, nome_loja, email, whatsapp_contato, plano_status, plano_tipo, trial_fim, created_at"),
+      sb.from("tentativas_pagamento_falhas").select("*, decoradoras(nome_loja, whatsapp_contato, plano_tipo, email)").order("criado_em", { ascending: false }).limit(50),
     ]);
-    if (rStatus.error || rPlanos.error || rLogs.error) {
-      setErro((rStatus.error && rStatus.error.message) || (rPlanos.error && rPlanos.error.message) || (rLogs.error && rLogs.error.message));
-    }
+    const primeiroErro = [rStatus, rPlanos, rLogs, rDecoradoras, rFalhas].map((r) => r.error).find(Boolean);
+    if (primeiroErro) setErro(primeiroErro.message);
     setStatus(rStatus.data || []);
     setPlanos(rPlanos.data || []);
     setLogs(rLogs.data || []);
+    setDecoradoras(rDecoradoras.data || []);
+    setFalhas(rFalhas.data || []);
   }
 
   useEffect(() => {
@@ -287,70 +321,171 @@ function CentralControle() {
   }, []);
 
   if (erro) return <div className="text-sm font-semibold px-4 py-3 rounded-xl" style={{ background: BRAND.rosa + "15", color: BRAND.rosa }}>⚠️ {erro}</div>;
-  if (!status || !planos || !logs) return <div className="text-center py-10 text-slate-400">Carregando central de controle...</div>;
+  if (!status || !planos || !logs || !decoradoras || !falhas) return <div className="text-center py-10 text-slate-400">Carregando central de controle...</div>;
 
   const porServico = Object.fromEntries(status.map((s) => [s.servico, s]));
   const mrr = planos.reduce((acc, p) => acc + (Number(p.valor_estimado) || 0), 0);
   const logsFiltrados = logs.filter((l) => filtroLog === "todos" ? true : filtroLog === "sucesso" ? l.sucesso === true : l.sucesso === false);
 
+  const trialLista = decoradoras
+    .filter((d) => d.plano_status === "trial")
+    .map((d) => ({ ...d, diasRestantes: Math.ceil((new Date(d.trial_fim) - new Date(todayISO())) / 86400000) }))
+    .sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+  const bloqueadaLista = decoradoras
+    .filter((d) => d.plano_status === "bloqueada")
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  const CARDS_COM_DETALHE = { trial: trialLista, bloqueada: bloqueadaLista };
+
   return (
-    <div className="space-y-5">
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {ORDEM_SERVICO_CC.map((chave) => {
-          const s = porServico[chave];
-          return (
-            <div key={chave} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3">
-              <SinalServico status={s ? s.status : null} />
-              <div className="min-w-0">
-                <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>{NOME_SERVICO_CC[chave]}</p>
-                <p className="text-xs text-slate-400 truncate" title={s ? s.detalhes : ""}>{s ? `${s.detalhes || (s.status === "ok" ? "Tudo certo" : "Falha")} · ${tempoRelativoCC(s.verificado_em)}` : "sem dado ainda"}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="rounded-2xl p-4 shadow-sm text-white lg:col-span-1" style={{ background: `linear-gradient(120deg, ${BRAND.rosa}, ${BRAND.roxo})` }}>
-          <p className="text-xs font-bold uppercase opacity-80">MRR estimado</p>
-          <p className="text-2xl font-extrabold mt-1">{formatBRL(mrr)}</p>
-        </div>
-        {planos.filter((p) => p.plano_status).sort((a, b) => b.quantidade - a.quantidade).map((p) => (
-          <div key={p.plano_status} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
-            <p className="text-xs font-bold uppercase" style={{ color: STATUS_CORES[p.plano_status] || BRAND.tinta }}>{STATUS_LABELS[p.plano_status] || p.plano_status}</p>
-            <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{p.quantidade}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>Envios de WhatsApp recentes</p>
-          <div className="flex gap-2">
-            {[["todos", "Todos"], ["sucesso", "Só sucesso"], ["falha", "Só falhas"]].map(([v, label]) => (
-              <button key={v} onClick={() => setFiltroLog(v)} className="px-3 py-1 rounded-full text-xs font-bold cursor-pointer" style={filtroLog === v ? { background: BRAND.azul, color: "#fff" } : { background: "#F1F3FA", color: BRAND.tinta }}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-1 max-h-96 overflow-y-auto">
-          {logsFiltrados.map((l) => (
-            <div key={l.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{l.telefone || "—"}</p>
-                <p className="text-xs text-slate-400 truncate">{l.evento} {l.motivo ? `· ${l.motivo}` : ""}</p>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                {!l.sucesso && l.telefone && (
-                  <a href={linkReenviarWhatsApp(l.telefone)} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white" style={{ background: BRAND.turquesa }}>Reenviar</a>
-                )}
-                <div className="text-right">
-                  <Pill color={l.sucesso ? BRAND.turquesa : BRAND.rosa}>{l.sucesso ? "Enviado" : "Falhou"}</Pill>
-                  <p className="text-[11px] text-slate-400 mt-1">{tempoRelativoCC(l.criado_em)}</p>
+    <div className="space-y-6">
+      {/* ============ SISTEMA NO AR ============ */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: BRAND.tinta + "80" }}>🟢 Sistema no ar</p>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {ORDEM_SERVICO_CC.map((chave) => {
+            const s = porServico[chave];
+            return (
+              <div key={chave} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3">
+                <SinalServico status={s ? s.status : null} />
+                <div className="min-w-0">
+                  <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>{NOME_SERVICO_CC[chave]}</p>
+                  <p className="text-xs text-slate-400 truncate" title={s ? s.detalhes : ""}>{s ? `${s.detalhes || (s.status === "ok" ? "Tudo certo" : "Falha")} · ${tempoRelativoCC(s.verificado_em)}` : "sem dado ainda"}</p>
                 </div>
               </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ============ CLIENTES & FINANCEIRO ============ */}
+      <div className="pt-5 border-t border-slate-200 space-y-4">
+        <p className="text-xs font-bold uppercase tracking-wide" style={{ color: BRAND.tinta + "80" }}>👥 Clientes &amp; Financeiro</p>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="rounded-2xl p-4 shadow-sm text-white lg:col-span-1" style={{ background: `linear-gradient(120deg, ${BRAND.rosa}, ${BRAND.roxo})` }}>
+            <p className="text-xs font-bold uppercase opacity-80">MRR estimado</p>
+            <p className="text-2xl font-extrabold mt-1">{formatBRL(mrr)}</p>
+          </div>
+          {planos.filter((p) => p.plano_status).sort((a, b) => b.quantidade - a.quantidade).map((p) => {
+            const temDetalhe = !!CARDS_COM_DETALHE[p.plano_status];
+            const aberto = statusAberto === p.plano_status;
+            return (
+              <div
+                key={p.plano_status}
+                onClick={() => temDetalhe && setStatusAberto(aberto ? null : p.plano_status)}
+                className="bg-white rounded-2xl p-4 shadow-sm border-2 transition-colors"
+                style={{ borderColor: aberto ? STATUS_CORES[p.plano_status] || BRAND.tinta : "#F1F3FA", cursor: temDetalhe ? "pointer" : "default" }}
+              >
+                <p className="text-xs font-bold uppercase" style={{ color: STATUS_CORES[p.plano_status] || BRAND.tinta }}>{STATUS_LABELS[p.plano_status] || p.plano_status}</p>
+                <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{p.quantidade}</p>
+                {temDetalhe && <p className="text-[11px] font-bold mt-1" style={{ color: STATUS_CORES[p.plano_status] }}>{aberto ? "▲ fechar lista" : "▾ ver lista"}</p>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Lista detalhada de Em Teste */}
+        {statusAberto === "trial" && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+            <p className="font-bold text-sm mb-3" style={{ color: BRAND.tinta }}>⏰ Em teste — ordenado por quem vence primeiro</p>
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {trialLista.map((d) => (
+                <div key={d.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0 gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{d.nome_loja || "sem nome"}</p>
+                    <p className="text-xs text-slate-400 truncate">{d.email || "sem e-mail"} · {d.plano_tipo === "premium" ? "Premium" : "Básico"}</p>
+                  </div>
+                  <Pill color={d.diasRestantes <= 1 ? BRAND.rosa : d.diasRestantes <= 3 ? "#F97316" : BRAND.turquesa}>
+                    {d.diasRestantes < 0 ? "vencido" : d.diasRestantes === 0 ? "vence hoje" : `${d.diasRestantes}d restantes`}
+                  </Pill>
+                  {d.whatsapp_contato && (
+                    <a href={linkCobrancaWhatsApp(d, "trial")} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white shrink-0" style={{ background: BRAND.turquesa }}>WhatsApp</a>
+                  )}
+                </div>
+              ))}
+              {trialLista.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Ninguém em teste no momento.</p>}
             </div>
-          ))}
-          {logsFiltrados.length === 0 && <p className="text-sm text-slate-400 py-4 text-center">Nenhum envio encontrado.</p>}
+          </div>
+        )}
+
+        {/* Lista detalhada de Bloqueadas */}
+        {statusAberto === "bloqueada" && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+            <p className="font-bold text-sm mb-3" style={{ color: BRAND.tinta }}>🔒 Bloqueadas</p>
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {bloqueadaLista.map((d) => (
+                <div key={d.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0 gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{d.nome_loja || "sem nome"}</p>
+                    <p className="text-xs text-slate-400 truncate">{d.email || "sem e-mail"} · bloqueada {tempoRelativoCC(d.created_at)}</p>
+                  </div>
+                  {d.whatsapp_contato && (
+                    <a href={linkCobrancaWhatsApp(d, "bloqueada")} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white shrink-0" style={{ background: BRAND.turquesa }}>WhatsApp</a>
+                  )}
+                </div>
+              ))}
+              {bloqueadaLista.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Ninguém bloqueada no momento.</p>}
+            </div>
+          </div>
+        )}
+
+        {/* Pagamentos que falharam */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <p className="font-bold text-sm mb-3" style={{ color: BRAND.tinta }}>💳 Pagamentos que falharam</p>
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {falhas.map((f) => {
+              const d = f.decoradoras || {};
+              return (
+                <div key={f.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0 gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{d.nome_loja || f.email || "sem nome"}</p>
+                    <p className="text-xs text-slate-400 truncate">
+                      {MOTIVO_FALHA_LABELS[f.motivo_codigo] || f.motivo_mensagem || f.motivo_codigo || "Motivo não informado"}
+                      {f.valor ? ` · ${formatBRL(f.valor)}` : ""} · {tempoRelativoCC(f.criado_em)}
+                    </p>
+                  </div>
+                  {d.whatsapp_contato && (
+                    <a href={linkCobrancaWhatsApp({ ...d, email: d.email || f.email }, "falha")} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white shrink-0" style={{ background: BRAND.turquesa }}>WhatsApp</a>
+                  )}
+                </div>
+              );
+            })}
+            {falhas.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Nenhuma falha de pagamento registrada ainda.</p>}
+          </div>
+        </div>
+
+        {/* Envios de WhatsApp recentes */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <p className="font-bold text-sm" style={{ color: BRAND.tinta }}>Envios de WhatsApp recentes</p>
+            <div className="flex gap-2">
+              {[["todos", "Todos"], ["sucesso", "Só sucesso"], ["falha", "Só falhas"]].map(([v, label]) => (
+                <button key={v} onClick={() => setFiltroLog(v)} className="px-3 py-1 rounded-full text-xs font-bold cursor-pointer" style={filtroLog === v ? { background: BRAND.azul, color: "#fff" } : { background: "#F1F3FA", color: BRAND.tinta }}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {logsFiltrados.map((l) => (
+              <div key={l.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm truncate" style={{ color: BRAND.tinta }}>{l.telefone || "—"}</p>
+                  <p className="text-xs text-slate-400 truncate">{l.evento} {l.motivo ? `· ${l.motivo}` : ""}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  {!l.sucesso && l.telefone && (
+                    <a href={linkReenviarWhatsApp(l.telefone)} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer text-white" style={{ background: BRAND.turquesa }}>Reenviar</a>
+                  )}
+                  <div className="text-right">
+                    <Pill color={l.sucesso ? BRAND.turquesa : BRAND.rosa}>{l.sucesso ? "Enviado" : "Falhou"}</Pill>
+                    <p className="text-[11px] text-slate-400 mt-1">{tempoRelativoCC(l.criado_em)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {logsFiltrados.length === 0 && <p className="text-sm text-slate-400 py-4 text-center">Nenhum envio encontrado.</p>}
+          </div>
         </div>
       </div>
     </div>
