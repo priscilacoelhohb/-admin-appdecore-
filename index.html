@@ -493,6 +493,121 @@ function CentralControle() {
 }
 
 /* ============================================================
+   TROCAR SENHA (emergência — quando o e-mail de recuperação falha)
+============================================================ */
+// Precisa bater com o segredo ADMIN_RESET_SECRET configurado nas
+// variáveis da function "admin-reset-senha" lá no Supabase.
+const ADMIN_RESET_SECRET = "appdecore-adm-9f2k7x";
+
+function TrocarSenhaTab() {
+  const [busca, setBusca] = useState("");
+  const [resultados, setResultados] = useState([]);
+  const [buscando, setBuscando] = useState(false);
+  const [jaBuscou, setJaBuscou] = useState(false);
+  const [selecionada, setSelecionada] = useState(null);
+  const [trocando, setTrocando] = useState(false);
+  const [senhaGerada, setSenhaGerada] = useState("");
+  const [erro, setErro] = useState("");
+
+  async function buscar() {
+    if (!busca.trim()) { setResultados([]); return; }
+    setBuscando(true);
+    setErro(""); setSenhaGerada(""); setSelecionada(null);
+    const termo = busca.trim();
+    const { data, error } = await sb.from("decoradoras")
+      .select("id, nome_loja, email, plano_tipo, plano_status")
+      .or(`nome_loja.ilike.%${termo}%,email.ilike.%${termo}%`)
+      .limit(15);
+    if (!error) setResultados(data || []);
+    setBuscando(false);
+    setJaBuscou(true);
+  }
+
+  async function trocarSenha() {
+    if (!selecionada || !selecionada.email) return;
+    setTrocando(true); setErro(""); setSenhaGerada("");
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/admin-reset-senha`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: selecionada.email, secret: ADMIN_RESET_SECRET }),
+      });
+      const data = await resp.json();
+      if (!data.ok) setErro(data.erro || "Erro ao trocar a senha.");
+      else setSenhaGerada(data.senha);
+    } catch (e) {
+      setErro("Erro de conexão: " + e.message);
+    }
+    setTrocando(false);
+  }
+
+  return (
+    <div>
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-4">
+        <p className="font-bold mb-1" style={{ color: BRAND.tinta }}>🔑 Trocar senha de uma cliente</p>
+        <p className="text-xs text-slate-400 mb-4">Pra quando o link de recuperação por e-mail não funciona (provedor de e-mail bloqueando, etc). Gera uma senha nova na hora, sem depender de e-mail nenhum.</p>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 text-sm"
+            placeholder="🔎 Buscar por nome da loja ou e-mail..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && buscar()}
+          />
+          <button onClick={buscar} disabled={buscando} className="px-5 py-2.5 rounded-xl font-bold text-white text-sm cursor-pointer disabled:opacity-60 shrink-0" style={{ background: BRAND.azul }}>
+            {buscando ? "..." : "🔎 Buscar"}
+          </button>
+        </div>
+      </div>
+
+      {resultados.length > 0 && !selecionada && (
+        <div className="space-y-2 mb-4">
+          {resultados.map((d) => (
+            <button key={d.id} onClick={() => setSelecionada(d)} className="w-full text-left bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3 cursor-pointer hover:border-slate-300 transition">
+              <div className="min-w-0 flex-1">
+                <p className="font-bold truncate" style={{ color: BRAND.tinta }}>{d.nome_loja}</p>
+                <p className="text-xs text-slate-400 truncate">{d.email || "sem e-mail registrado"}</p>
+              </div>
+              <Pill color={STATUS_CORES[d.plano_status] || BRAND.tinta}>{STATUS_LABELS[d.plano_status] || d.plano_status}</Pill>
+            </button>
+          ))}
+        </div>
+      )}
+      {jaBuscou && resultados.length === 0 && !buscando && (
+        <p className="text-sm text-slate-400 text-center py-4">Nenhuma decoradora encontrada com esse nome/e-mail.</p>
+      )}
+
+      {selecionada && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <div className="min-w-0">
+              <p className="font-bold truncate" style={{ color: BRAND.tinta }}>{selecionada.nome_loja}</p>
+              <p className="text-xs text-slate-400 truncate">{selecionada.email}</p>
+            </div>
+            <button onClick={() => { setSelecionada(null); setSenhaGerada(""); setErro(""); }} className="text-xs text-slate-400 underline cursor-pointer shrink-0">Trocar de cliente</button>
+          </div>
+
+          {!selecionada.email ? (
+            <p className="text-xs text-red-500">Essa decoradora não tem e-mail cadastrado — não dá pra trocar a senha.</p>
+          ) : !senhaGerada ? (
+            <button onClick={trocarSenha} disabled={trocando} className="w-full py-3 rounded-xl font-bold text-white cursor-pointer disabled:opacity-60" style={{ background: BRAND.rosa }}>
+              {trocando ? "Gerando senha nova..." : "Gerar senha nova"}
+            </button>
+          ) : (
+            <div className="rounded-xl p-4" style={{ background: BRAND.bg }}>
+              <p className="text-xs text-slate-500 mb-1">Senha nova — copia e manda pra ela por WhatsApp:</p>
+              <p className="fredoka text-2xl font-bold tracking-wide" style={{ color: BRAND.azul }}>{senhaGerada}</p>
+              <button onClick={() => navigator.clipboard.writeText(senhaGerada)} className="mt-2 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer" style={{ background: BRAND.turquesa + "22", color: BRAND.turquesa }}>📋 Copiar senha</button>
+            </div>
+          )}
+          {erro && <p className="text-xs text-red-500 mt-3">{erro}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    APP PRINCIPAL DO ADMIN
 ============================================================ */
 /* ============================================================
@@ -644,8 +759,9 @@ function AdminApp() {
           <button onClick={() => setAba("relatorios")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "relatorios" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Relatórios</button>
           <button onClick={() => setAba("configuracoes")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "configuracoes" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Configurações</button>
           <button onClick={() => setAba("central")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "central" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Central de Controle</button>
+          <button onClick={() => setAba("senha")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "senha" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>🔑 Trocar Senha</button>
         </div>
-        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : aba === "central" ? <CentralControle /> : <ConfiguracoesTab />}
+        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : aba === "central" ? <CentralControle /> : aba === "senha" ? <TrocarSenhaTab /> : <ConfiguracoesTab />}
       </div>
     </div>
   );
