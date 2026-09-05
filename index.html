@@ -632,6 +632,12 @@ function CustosBalancoTab() {
     return true;
   }).length;
 
+  const bloqueadasInadimplentes = decoradoras.filter((d) => d.plano_status === "bloqueada" || d.plano_status === "inadimplente").length;
+  // Base = todo mundo que já teve uma assinatura de verdade (trial/cortesia não contam, nunca pagaram)
+  const baseChurn = decoradoras.filter((d) => ["ativo", "bloqueada", "inadimplente", "cancelado"].includes(d.plano_status)).length;
+  const canceladasOuBloqueadas = decoradoras.filter((d) => ["bloqueada", "inadimplente", "cancelado"].includes(d.plano_status)).length;
+  const taxaCancelamento = baseChurn > 0 ? (canceladasOuBloqueadas / baseChurn) * 100 : 0;
+
   return (
     <div className="space-y-5">
       <div className="relative">
@@ -679,7 +685,7 @@ function CustosBalancoTab() {
 
       <div>
         <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: BRAND.tinta + "80" }}>📊 Resumo</p>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, ${BRAND.azul})` }}>
             <p className="text-xs font-bold uppercase opacity-80">Receita (MRR)</p>
             <p className="text-2xl font-extrabold mt-1">{formatBRL(mrr)}</p>
@@ -691,6 +697,14 @@ function CustosBalancoTab() {
           <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.roxo}, ${BRAND.azul})` }}>
             <p className="text-xs font-bold uppercase opacity-80">Assinaturas ativas</p>
             <p className="text-2xl font-extrabold mt-1">{assinaturasAtivasNoPeriodo}</p>
+          </div>
+          <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, #F97316, #B91C1C)` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Bloqueadas/Inadimplentes</p>
+            <p className="text-2xl font-extrabold mt-1">{bloqueadasInadimplentes}</p>
+          </div>
+          <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, #7C3AED, #DB2777)` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Taxa de cancelamento</p>
+            <p className="text-2xl font-extrabold mt-1">{baseChurn > 0 ? `${taxaCancelamento.toFixed(1)}%` : "—"}</p>
           </div>
           <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.azulEscuro}, ${BRAND.rosa})` }}>
             <p className="text-xs font-bold uppercase opacity-80">Gasto c/ anúncio</p>
@@ -709,6 +723,7 @@ function CustosBalancoTab() {
         </div>
         <p className="text-[11px] text-slate-400 mt-2">
           Receita {(stripeOk || caktoOk) ? "é o MRR real (Stripe + Cakto)" : "é uma estimativa do banco (carregando o real...)"}. Custos fixos e saldo são a foto de agora. Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.
+          Taxa de cancelamento é sobre o histórico total (bloqueadas + inadimplentes + canceladas ÷ tudo que já assinou) — ainda não dá pra medir renovação mês a mês da Cakto porque a integração é recente, isso fica mais preciso com o tempo.
         </p>
       </div>
 
