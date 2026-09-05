@@ -614,7 +614,12 @@ function CustosBalancoTab() {
   if (erro) return <div className="text-sm font-semibold px-4 py-3 rounded-xl" style={{ background: BRAND.rosa + "15", color: BRAND.rosa }}>⚠️ {erro}</div>;
   if (!planos || !custos || !decoradoras) return <div className="text-center py-10 text-slate-400">Carregando custos e balanço...</div>;
 
-  const mrr = planos.reduce((acc, p) => acc + (Number(p.valor_estimado) || 0), 0);
+  const mrrEstimado = planos.reduce((acc, p) => acc + (Number(p.valor_estimado) || 0), 0);
+  const stripeOk = externo?.stripe && !externo.stripe.erro;
+  const caktoOk = externo?.cakto && !externo.cakto.erro;
+  const mrrReal = (stripeOk ? externo.stripe.mrr : 0) + (caktoOk ? externo.cakto.mrr : 0);
+  // Usa o MRR real (Stripe + Cakto) assim que disponível — a estimativa do banco só serve de placeholder enquanto carrega.
+  const mrr = (stripeOk || caktoOk) ? mrrReal : mrrEstimado;
   const totalCustos = custos.reduce((acc, c) => acc + (Number(c.valor) || 0), 0);
   const saldo = mrr - totalCustos;
 
@@ -702,7 +707,9 @@ function CustosBalancoTab() {
             <p className="text-2xl font-extrabold mt-1">{formatBRL(saldo)}</p>
           </div>
         </div>
-        <p className="text-[11px] text-slate-400 mt-2">Receita, custos fixos e saldo são a foto de agora (assinaturas ativas hoje). Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.</p>
+        <p className="text-[11px] text-slate-400 mt-2">
+          Receita {(stripeOk || caktoOk) ? "é o MRR real (Stripe + Cakto)" : "é uma estimativa do banco (carregando o real...)"}. Custos fixos e saldo são a foto de agora. Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.
+        </p>
       </div>
 
       <div>
