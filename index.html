@@ -521,21 +521,21 @@ function CustosBalancoTab() {
   const [novoNome, setNovoNome] = useState("");
   const [novoValor, setNovoValor] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      setCarregandoExterno(true);
-      const { data, error } = await sb.functions.invoke("financeiro-externo");
-      if (!error) setExterno(data);
-      setCarregandoExterno(false);
-    })();
-  }, []);
-
   // Filtro de período — mesmo padrão já usado no Financeiro do painel da decoradora
   const [filtroInicio, setFiltroInicio] = useState(null);
   const [filtroFim, setFiltroFim] = useState(null);
   const [filtroAberto, setFiltroAberto] = useState(false);
   const [rascunhoInicio, setRascunhoInicio] = useState("");
   const [rascunhoFim, setRascunhoFim] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setCarregandoExterno(true);
+      const { data, error } = await sb.functions.invoke("financeiro-externo", { body: { desde: filtroInicio, ate: filtroFim } });
+      if (!error) setExterno(data);
+      setCarregandoExterno(false);
+    })();
+  }, [filtroInicio, filtroFim]);
 
   function aplicarAtalho(chave) {
     const [ini, fim] = calcularAtalhoCB(chave);
@@ -707,9 +707,20 @@ function CustosBalancoTab() {
             <p className="text-xs font-bold uppercase" style={{ color: BRAND.azul }}>Novas assinaturas</p>
             <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{novasNoPeriodo}</p>
           </div>
-          <div className="bg-white rounded-2xl p-4 shadow-sm border-2 opacity-60" style={{ borderColor: "#F1F3FA" }}>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border-2" style={{ borderColor: "#F1F3FA" }}>
             <p className="text-xs font-bold uppercase" style={{ color: BRAND.tinta }}>Gasto com anúncio (Meta Ads)</p>
-            <p className="text-sm font-semibold mt-1 text-slate-400">Pendente de integração</p>
+            {carregandoExterno ? (
+              <p className="text-sm text-slate-400 mt-1">Consultando...</p>
+            ) : externo?.metaAds?.erro ? (
+              <p className="text-sm font-semibold mt-1 text-rose-500">⚠️ {externo.metaAds.erro}</p>
+            ) : (
+              <>
+                <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{formatBRL(externo?.metaAds?.spend)}</p>
+                <p className="text-[11px] text-slate-400 mt-1 truncate" title={(externo?.metaAds?.campanhas || []).join(", ")}>
+                  {(externo?.metaAds?.campanhas || []).length} campanha{(externo?.metaAds?.campanhas || []).length === 1 ? "" : "s"} com "appdecore" no nome
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -742,7 +753,7 @@ function CustosBalancoTab() {
           </div>
         </div>
       </div>
-      <p className="text-xs text-slate-400">💡 MRR e saldo são a foto de agora (assinaturas ativas hoje) — não existe histórico de MRR por dia ainda pra filtrar por período. O anúncio (Meta Ads) vai virar automático e sensível ao período assim que o acesso à API da Meta for configurado.</p>
+      <p className="text-xs text-slate-400">💡 MRR e saldo (Stripe/Cakto) são a foto de agora (assinaturas ativas hoje) — não existe histórico de MRR por dia ainda pra filtrar por período. Já o gasto com Meta Ads respeita o período selecionado, e soma automaticamente qualquer campanha com "appdecore" no nome (inclusive futuras, como remarketing).</p>
     </div>
   );
 }
