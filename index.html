@@ -747,6 +747,25 @@ function CustosBalancoTab() {
         )}
       </div>
 
+      {externo?.diagnostico && !externo.diagnostico.erro && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border-2 border-amber-300">
+          <p className="font-bold text-sm mb-3" style={{ color: BRAND.tinta }}>🔍 Diagnóstico temporário — status banco vs. Stripe/Cakto real</p>
+          {[
+            ["Tem assinatura Stripe ATIVA mas status no banco não é 'ativo'", externo.diagnostico.stripeDeveriaEstarAtivo],
+            ["Status 'ativo' no banco mas Stripe NÃO mostra essa assinatura como ativa", externo.diagnostico.stripeNaoDeveriaEstarAtivo],
+            ["Tem assinatura Cakto ATIVA mas status no banco não é 'ativo'", externo.diagnostico.caktoDeveriaEstarAtivo],
+            ["Status 'ativo' no banco mas Cakto NÃO mostra essa assinatura como ativa", externo.diagnostico.caktoNaoDeveriaEstarAtivo],
+          ].map(([titulo, lista]) => (
+            <div key={titulo} className="mb-3">
+              <p className="text-xs font-bold" style={{ color: (lista || []).length > 0 ? BRAND.rosa : BRAND.turquesa }}>{titulo}: {(lista || []).length}</p>
+              {(lista || []).map((d, i) => (
+                <p key={i} className="text-xs text-slate-500 ml-2">• {d.nome_loja || "sem nome"} ({d.email || "sem email"}){d.status_no_banco ? ` — banco diz: ${d.status_no_banco}` : ""}</p>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
       {externo?.metaAds && !externo.metaAds.erro && (
         <div className="text-xs text-slate-400 -mt-3">
           <button onClick={() => setMostrarCampanhas((v) => !v)} className="font-semibold cursor-pointer" style={{ color: BRAND.azul }}>
