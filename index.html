@@ -515,6 +515,7 @@ function CustosBalancoTab() {
   const [custos, setCustos] = useState(null);
   const [decoradoras, setDecoradoras] = useState(null);
   const [externo, setExterno] = useState(null); // MRR real + saldo, via Stripe/Cakto
+  const [erroExterno, setErroExterno] = useState("");
   const [carregandoExterno, setCarregandoExterno] = useState(true);
   const [salvandoId, setSalvandoId] = useState(null);
   const [erro, setErro] = useState("");
@@ -531,8 +532,18 @@ function CustosBalancoTab() {
   useEffect(() => {
     (async () => {
       setCarregandoExterno(true);
+      setErroExterno("");
       const { data, error } = await sb.functions.invoke("financeiro-externo", { body: { desde: filtroInicio, ate: filtroFim } });
-      if (!error) setExterno(data);
+      if (!error) {
+        setExterno(data);
+      } else {
+        let detalhe = error.message || "";
+        try {
+          const corpo = await error.context.json();
+          detalhe = corpo.motivo || corpo.erro || detalhe;
+        } catch (_e) {}
+        setErroExterno(detalhe);
+      }
       setCarregandoExterno(false);
     })();
   }, [filtroInicio, filtroFim]);
@@ -670,7 +681,7 @@ function CustosBalancoTab() {
         {carregandoExterno ? (
           <p className="text-sm text-slate-400">Consultando Stripe e Cakto...</p>
         ) : !externo ? (
-          <p className="text-sm text-rose-500">Não consegui consultar a Stripe/Cakto agora.</p>
+          <p className="text-sm text-rose-500">⚠️ {erroExterno || "Não consegui consultar a Stripe/Cakto agora."}</p>
         ) : (
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="bg-white rounded-2xl p-4 shadow-sm border-2" style={{ borderColor: "#F1F3FA" }}>
