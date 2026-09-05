@@ -514,10 +514,21 @@ function CustosBalancoTab() {
   const [planos, setPlanos] = useState(null);
   const [custos, setCustos] = useState(null);
   const [decoradoras, setDecoradoras] = useState(null);
+  const [externo, setExterno] = useState(null); // MRR real + saldo, via Stripe/Cakto
+  const [carregandoExterno, setCarregandoExterno] = useState(true);
   const [salvandoId, setSalvandoId] = useState(null);
   const [erro, setErro] = useState("");
   const [novoNome, setNovoNome] = useState("");
   const [novoValor, setNovoValor] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setCarregandoExterno(true);
+      const { data, error } = await sb.functions.invoke("financeiro-externo");
+      if (!error) setExterno(data);
+      setCarregandoExterno(false);
+    })();
+  }, []);
 
   // Filtro de período — mesmo padrão já usado no Financeiro do painel da decoradora
   const [filtroInicio, setFiltroInicio] = useState(null);
@@ -652,6 +663,41 @@ function CustosBalancoTab() {
             <p className="text-2xl font-extrabold mt-1">{formatBRL(saldo)}</p>
           </div>
         </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: BRAND.tinta + "80" }}>🔗 MRR real (direto da Stripe e da Cakto)</p>
+        {carregandoExterno ? (
+          <p className="text-sm text-slate-400">Consultando Stripe e Cakto...</p>
+        ) : !externo ? (
+          <p className="text-sm text-rose-500">Não consegui consultar a Stripe/Cakto agora.</p>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div className="bg-white rounded-2xl p-4 shadow-sm border-2" style={{ borderColor: "#F1F3FA" }}>
+              <p className="text-xs font-bold uppercase" style={{ color: BRAND.roxo }}>Stripe</p>
+              {externo.stripe?.erro ? (
+                <p className="text-sm font-semibold mt-1 text-rose-500">⚠️ {externo.stripe.erro}</p>
+              ) : (
+                <>
+                  <p className="text-xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{formatBRL(externo.stripe.mrr)} <span className="text-xs font-semibold text-slate-400">MRR real</span></p>
+                  <p className="text-xs text-slate-400 mt-1">Saldo disponível pra saque: <b>{formatBRL(externo.stripe.saldoDisponivel)}</b></p>
+                  <p className="text-xs text-slate-400">Saldo pendente: {formatBRL(externo.stripe.saldoPendente)}</p>
+                </>
+              )}
+            </div>
+            <div className="bg-white rounded-2xl p-4 shadow-sm border-2" style={{ borderColor: "#F1F3FA" }}>
+              <p className="text-xs font-bold uppercase" style={{ color: BRAND.turquesa }}>Cakto</p>
+              {externo.cakto?.erro ? (
+                <p className="text-sm font-semibold mt-1 text-rose-500">⚠️ {externo.cakto.erro}</p>
+              ) : (
+                <>
+                  <p className="text-xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{formatBRL(externo.cakto.mrr)} <span className="text-xs font-semibold text-slate-400">MRR real</span></p>
+                  <p className="text-xs text-slate-400 mt-1">A Cakto não tem endpoint de saldo/saque na API pública ainda.</p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div>
