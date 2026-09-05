@@ -580,7 +580,7 @@ function CustosBalancoTab() {
     const [rPlanos, rCustos, rDecoradoras] = await Promise.all([
       sb.from("resumo_planos").select("*"),
       sb.from("custos_fixos").select("*").order("nome"),
-      sb.from("decoradoras").select("id, plano_status, created_at"),
+      sb.from("decoradoras").select("id, plano_status, created_at, stripe_subscription_id, cakto_subscription_id"),
     ]);
     const primeiroErro = [rPlanos, rCustos, rDecoradoras].map((r) => r.error).find(Boolean);
     if (primeiroErro) setErro(primeiroErro.message);
@@ -632,11 +632,14 @@ function CustosBalancoTab() {
     return true;
   }).length;
 
-  const bloqueadasInadimplentes = decoradoras.filter((d) => d.plano_status === "bloqueada" || d.plano_status === "inadimplente").length;
-  // Base = todo mundo que já teve uma assinatura de verdade (trial/cortesia não contam, nunca pagaram)
-  const baseChurn = decoradoras.filter((d) => ["ativo", "bloqueada", "inadimplente", "cancelado"].includes(d.plano_status)).length;
-  const canceladasOuBloqueadas = decoradoras.filter((d) => ["bloqueada", "inadimplente", "cancelado"].includes(d.plano_status)).length;
-  const taxaCancelamento = baseChurn > 0 ? (canceladasOuBloqueadas / baseChurn) * 100 : 0;
+  function jaTeveAssinatura(d) {
+    return (d.stripe_subscription_id && d.stripe_subscription_id !== "") || (d.cakto_subscription_id && d.cakto_subscription_id !== "");
+  }
+  // Só conta quem já pagou de verdade (teve stripe/cakto subscription_id) e não renovou —
+  // trial vencido sem nunca ter pago não é "não renovou", é só teste que não converteu.
+  const naoRenovaram = decoradoras.filter((d) => ["bloqueada", "inadimplente", "cancelado"].includes(d.plano_status) && jaTeveAssinatura(d)).length;
+  const baseChurn = decoradoras.filter((d) => d.plano_status === "ativo").length + naoRenovaram;
+  const taxaCancelamento = baseChurn > 0 ? (naoRenovaram / baseChurn) * 100 : 0;
 
   return (
     <div className="space-y-5">
@@ -699,8 +702,8 @@ function CustosBalancoTab() {
             <p className="text-2xl font-extrabold mt-1">{assinaturasAtivasNoPeriodo}</p>
           </div>
           <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, #F97316, #B91C1C)` }}>
-            <p className="text-xs font-bold uppercase opacity-80">Bloqueadas/Inadimplentes</p>
-            <p className="text-2xl font-extrabold mt-1">{bloqueadasInadimplentes}</p>
+            <p className="text-xs font-bold uppercase opacity-80">Não renovaram</p>
+            <p className="text-2xl font-extrabold mt-1">{naoRenovaram}</p>
           </div>
           <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, #7C3AED, #DB2777)` }}>
             <p className="text-xs font-bold uppercase opacity-80">Taxa de cancelamento</p>
@@ -723,7 +726,7 @@ function CustosBalancoTab() {
         </div>
         <p className="text-[11px] text-slate-400 mt-2">
           Receita {(stripeOk || caktoOk) ? "é o MRR real (Stripe + Cakto)" : "é uma estimativa do banco (carregando o real...)"}. Custos fixos e saldo são a foto de agora. Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.
-          Taxa de cancelamento é sobre o histórico total (bloqueadas + inadimplentes + canceladas ÷ tudo que já assinou) — ainda não dá pra medir renovação mês a mês da Cakto porque a integração é recente, isso fica mais preciso com o tempo.
+          "Não renovaram" e "Taxa de cancelamento" contam só quem já teve uma assinatura Stripe/Cakto de verdade e não continuou — trial vencido sem nunca ter pago não entra na conta. Ainda não dá pra medir renovação mês a mês da Cakto porque a integração é recente, isso fica mais preciso com o tempo.
         </p>
       </div>
 
