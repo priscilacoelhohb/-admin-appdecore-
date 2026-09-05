@@ -621,7 +621,9 @@ function CustosBalancoTab() {
   // Usa o MRR real (Stripe + Cakto) assim que disponível — a estimativa do banco só serve de placeholder enquanto carrega.
   const mrr = (stripeOk || caktoOk) ? mrrReal : mrrEstimado;
   const totalCustos = custos.reduce((acc, c) => acc + (Number(c.valor) || 0), 0);
-  const saldo = mrr - totalCustos;
+  const margemBruta = mrr - totalCustos;
+  const gastoAnuncio = externo?.metaAds && !externo.metaAds.erro ? Number(externo.metaAds.spend) || 0 : 0;
+  const lucroOperacional = margemBruta - gastoAnuncio;
 
   const assinaturasAtivasNoPeriodo = decoradoras.filter((d) => {
     if (d.plano_status !== "ativo") return false;
@@ -687,16 +689,22 @@ function CustosBalancoTab() {
       </div>
 
       <div className="space-y-4">
-        {/* Receita em destaque + Saldo */}
+        {/* Cascata: Receita bruta → Margem bruta → Lucro operacional */}
         <div className="grid sm:grid-cols-3 gap-3">
-          <div className="sm:col-span-2 rounded-2xl p-6 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, ${BRAND.azul})` }}>
-            <p className="text-xs font-bold uppercase opacity-80">Receita (MRR)</p>
-            <p className="text-4xl font-extrabold mt-1">{formatBRL(mrr)}</p>
+          <div className="rounded-2xl p-5 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, ${BRAND.azul})` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Receita bruta</p>
+            <p className="text-3xl font-extrabold mt-1">{formatBRL(mrr)}</p>
             <p className="text-[11px] opacity-70 mt-1">{(stripeOk || caktoOk) ? "MRR real (Stripe + Cakto)" : "estimativa do banco (carregando o real...)"}</p>
           </div>
-          <div className="rounded-2xl p-6 shadow-sm text-white flex flex-col justify-center" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, #16A34A)` }}>
-            <p className="text-xs font-bold uppercase opacity-80">Saldo</p>
-            <p className="text-3xl font-extrabold mt-1">{formatBRL(saldo)}</p>
+          <div className="rounded-2xl p-5 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.roxo}, ${BRAND.azulEscuro})` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Margem bruta</p>
+            <p className="text-3xl font-extrabold mt-1">{formatBRL(margemBruta)}</p>
+            <p className="text-[11px] opacity-70 mt-1">Receita − custos fixos</p>
+          </div>
+          <div className="rounded-2xl p-5 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, #16A34A)` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Lucro operacional</p>
+            <p className="text-3xl font-extrabold mt-1">{formatBRL(lucroOperacional)}</p>
+            <p className="text-[11px] opacity-70 mt-1">Margem bruta − anúncio (o que sobra de verdade)</p>
           </div>
         </div>
 
@@ -741,7 +749,7 @@ function CustosBalancoTab() {
         </div>
 
         <p className="text-[11px] text-slate-400">
-          Receita, custos fixos e saldo são a foto de agora. Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.
+          Receita, margem bruta e lucro operacional são a foto de agora (assinaturas ativas hoje). Assinaturas ativas e gasto com anúncio respeitam o período selecionado acima.
           "Não renovaram" e "Taxa de cancelamento" contam só quem já teve uma assinatura Stripe/Cakto de verdade e não continuou — trial vencido sem nunca ter pago não entra na conta. Ainda não dá pra medir renovação mês a mês da Cakto porque a integração é recente, isso fica mais preciso com o tempo.
         </p>
       </div>
