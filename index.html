@@ -493,6 +493,215 @@ function CentralControle() {
 }
 
 /* ============================================================
+   CUSTOS & BALANÇO (custos fixos vs. receita/MRR)
+============================================================ */
+function isoLocalCB(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function calcularAtalhoCB(chave) {
+  const hoje = new Date(); const y = hoje.getFullYear(), m = hoje.getMonth(), d = hoje.getDate();
+  if (chave === "hoje") return [isoLocalCB(hoje), isoLocalCB(hoje)];
+  if (chave === "ontem") { const on = new Date(y, m, d - 1); return [isoLocalCB(on), isoLocalCB(on)]; }
+  if (chave === "7dias") { const ini = new Date(y, m, d - 6); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  if (chave === "14dias") { const ini = new Date(y, m, d - 13); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  if (chave === "30dias") { const ini = new Date(y, m, d - 29); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  if (chave === "semana") { const ini = new Date(y, m, d - hoje.getDay()); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  if (chave === "mes") { const ini = new Date(y, m, 1); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  if (chave === "mespassado") { const ini = new Date(y, m - 1, 1); const fim = new Date(y, m, 0); return [isoLocalCB(ini), isoLocalCB(fim)]; }
+  if (chave === "ano") { const ini = new Date(y, 0, 1); return [isoLocalCB(ini), isoLocalCB(hoje)]; }
+  return [null, null]; // "maximo"
+}
+
+function CustosBalancoTab() {
+  const [planos, setPlanos] = useState(null);
+  const [custos, setCustos] = useState(null);
+  const [decoradoras, setDecoradoras] = useState(null);
+  const [salvandoId, setSalvandoId] = useState(null);
+  const [erro, setErro] = useState("");
+  const [novoNome, setNovoNome] = useState("");
+  const [novoValor, setNovoValor] = useState("");
+
+  // Filtro de período — mesmo padrão já usado no Financeiro do painel da decoradora
+  const [filtroInicio, setFiltroInicio] = useState(null);
+  const [filtroFim, setFiltroFim] = useState(null);
+  const [filtroAberto, setFiltroAberto] = useState(false);
+  const [rascunhoInicio, setRascunhoInicio] = useState("");
+  const [rascunhoFim, setRascunhoFim] = useState("");
+
+  function aplicarAtalho(chave) {
+    const [ini, fim] = calcularAtalhoCB(chave);
+    setFiltroInicio(ini); setFiltroFim(fim);
+    setFiltroAberto(false);
+  }
+  function abrirFiltro() {
+    setRascunhoInicio(filtroInicio || ""); setRascunhoFim(filtroFim || "");
+    setFiltroAberto(true);
+  }
+  function aplicarPersonalizado() {
+    setFiltroInicio(rascunhoInicio || null); setFiltroFim(rascunhoFim || null);
+    setFiltroAberto(false);
+  }
+  const filtroLabel = (!filtroInicio && !filtroFim) ? "Máximo (tudo)" : `${formatDateBR(filtroInicio)} — ${formatDateBR(filtroFim)}`;
+
+  const carregar = useCallback(async () => {
+    const [rPlanos, rCustos, rDecoradoras] = await Promise.all([
+      sb.from("resumo_planos").select("*"),
+      sb.from("custos_fixos").select("*").order("nome"),
+      sb.from("decoradoras").select("id, plano_status, created_at"),
+    ]);
+    const primeiroErro = [rPlanos, rCustos, rDecoradoras].map((r) => r.error).find(Boolean);
+    if (primeiroErro) setErro(primeiroErro.message);
+    setPlanos(rPlanos.data || []);
+    setCustos(rCustos.data || []);
+    setDecoradoras(rDecoradoras.data || []);
+  }, []);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function salvarValor(id, valor) {
+    const numerico = Number(valor) || 0;
+    setSalvandoId(id);
+    const { error } = await sb.from("custos_fixos").update({ valor: numerico, atualizado_em: new Date().toISOString() }).eq("id", id);
+    if (!error) setCustos((c) => c.map((x) => (x.id === id ? { ...x, valor: numerico } : x)));
+    setSalvandoId(null);
+  }
+
+  async function removerCusto(id) {
+    setCustos((c) => c.filter((x) => x.id !== id));
+    await sb.from("custos_fixos").delete().eq("id", id);
+  }
+
+  async function adicionarCusto() {
+    if (!novoNome.trim()) return;
+    const { data, error } = await sb.from("custos_fixos").insert({ nome: novoNome.trim(), valor: Number(novoValor) || 0 }).select().maybeSingle();
+    if (!error && data) setCustos((c) => [...c, data]);
+    setNovoNome(""); setNovoValor("");
+  }
+
+  if (erro) return <div className="text-sm font-semibold px-4 py-3 rounded-xl" style={{ background: BRAND.rosa + "15", color: BRAND.rosa }}>⚠️ {erro}</div>;
+  if (!planos || !custos || !decoradoras) return <div className="text-center py-10 text-slate-400">Carregando custos e balanço...</div>;
+
+  const mrr = planos.reduce((acc, p) => acc + (Number(p.valor_estimado) || 0), 0);
+  const totalCustos = custos.reduce((acc, c) => acc + (Number(c.valor) || 0), 0);
+  const saldo = mrr - totalCustos;
+
+  const novasNoPeriodo = decoradoras.filter((d) => {
+    const dataStr = (d.created_at || "").slice(0, 10);
+    if (!dataStr) return false;
+    if (filtroInicio && dataStr < filtroInicio) return false;
+    if (filtroFim && dataStr > filtroFim) return false;
+    return true;
+  }).length;
+
+  return (
+    <div className="space-y-5">
+      <div className="relative">
+        <button onClick={() => (filtroAberto ? setFiltroAberto(false) : abrirFiltro())} className="flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-bold cursor-pointer" style={{ borderColor: (filtroInicio || filtroFim) ? BRAND.roxo : "#e2e8f0", color: (filtroInicio || filtroFim) ? BRAND.roxo : BRAND.tinta, background: (filtroInicio || filtroFim) ? BRAND.roxo + "10" : "#fff" }}>
+          📅 {filtroLabel}
+          <span className="text-xs">{filtroAberto ? "▾" : "▸"}</span>
+        </button>
+
+        {filtroAberto && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setFiltroAberto(false)} />
+            <div className="absolute left-0 top-full mt-2 z-40 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden" style={{ width: 320, maxWidth: "90vw" }}>
+              <div className="flex flex-col sm:flex-row">
+                <div className="flex sm:flex-col overflow-x-auto sm:overflow-visible border-b sm:border-b-0 sm:border-r border-slate-100" style={{ background: "#FAFAFC" }}>
+                  {[
+                    ["hoje", "Hoje"], ["ontem", "Ontem"], ["7dias", "Últimos 7 dias"], ["14dias", "Últimos 14 dias"],
+                    ["30dias", "Últimos 30 dias"], ["semana", "Esta semana"], ["mes", "Este mês"], ["mespassado", "Mês passado"],
+                    ["ano", "Este ano"], ["maximo", "Máximo"],
+                  ].map(([chave, label]) => (
+                    <button key={chave} type="button" onClick={() => aplicarAtalho(chave)} className="text-left text-xs font-semibold px-3.5 py-2.5 whitespace-nowrap sm:whitespace-normal hover:bg-white cursor-pointer" style={{ color: BRAND.tinta }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="p-3.5 flex-1">
+                  <p className="text-xs font-bold mb-2" style={{ color: BRAND.tinta }}>Período personalizado</p>
+                  <label className="block mb-2">
+                    <span className="block text-[11px] text-slate-400 mb-1">De</span>
+                    <input type="date" className="w-full rounded-lg border-2 border-slate-200 px-2 py-1.5 text-sm" value={rascunhoInicio} onChange={(e) => setRascunhoInicio(e.target.value)} />
+                  </label>
+                  <label className="block mb-3">
+                    <span className="block text-[11px] text-slate-400 mb-1">Até</span>
+                    <input type="date" className="w-full rounded-lg border-2 border-slate-200 px-2 py-1.5 text-sm" value={rascunhoFim} onChange={(e) => setRascunhoFim(e.target.value)} />
+                  </label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setFiltroAberto(false)} className="flex-1 py-2 rounded-lg text-xs font-bold cursor-pointer" style={{ background: "#f1f5f9", color: "#64748b" }}>Cancelar</button>
+                    <button type="button" onClick={aplicarPersonalizado} className="flex-1 py-2 rounded-lg text-xs font-bold text-white cursor-pointer" style={{ background: BRAND.roxo }}>Atualizar</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: BRAND.tinta + "80" }}>📌 Situação atual (não muda com o período)</p>
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.turquesa}, ${BRAND.azul})` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Receita (MRR)</p>
+            <p className="text-2xl font-extrabold mt-1">{formatBRL(mrr)}</p>
+          </div>
+          <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: `linear-gradient(120deg, ${BRAND.rosa}, #F97316)` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Custos fixos</p>
+            <p className="text-2xl font-extrabold mt-1">{formatBRL(totalCustos)}</p>
+          </div>
+          <div className="rounded-2xl p-4 shadow-sm text-white" style={{ background: saldo >= 0 ? `linear-gradient(120deg, ${BRAND.turquesa}, #16A34A)` : `linear-gradient(120deg, ${BRAND.rosa}, #B91C1C)` }}>
+            <p className="text-xs font-bold uppercase opacity-80">Saldo</p>
+            <p className="text-2xl font-extrabold mt-1">{formatBRL(saldo)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: BRAND.tinta + "80" }}>📅 No período selecionado</p>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div className="bg-white rounded-2xl p-4 shadow-sm border-2" style={{ borderColor: "#F1F3FA" }}>
+            <p className="text-xs font-bold uppercase" style={{ color: BRAND.azul }}>Novas assinaturas</p>
+            <p className="text-2xl font-extrabold mt-1" style={{ color: BRAND.tinta }}>{novasNoPeriodo}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border-2 opacity-60" style={{ borderColor: "#F1F3FA" }}>
+            <p className="text-xs font-bold uppercase" style={{ color: BRAND.tinta }}>Gasto com anúncio (Meta Ads)</p>
+            <p className="text-sm font-semibold mt-1 text-slate-400">Pendente de integração</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <p className="font-bold text-sm mb-3" style={{ color: BRAND.tinta }}>💸 Custos fixos mensais</p>
+        <div className="space-y-2 mb-4">
+          {custos.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+              <p className="flex-1 text-sm font-semibold truncate" style={{ color: BRAND.tinta }}>{c.nome}</p>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-xs text-slate-400">R$</span>
+                <input
+                  type="number" step="0.01" defaultValue={c.valor}
+                  onBlur={(e) => salvarValor(c.id, e.target.value)}
+                  disabled={salvandoId === c.id}
+                  className="w-24 rounded-lg border-2 border-slate-200 px-2 py-1 text-sm text-right"
+                />
+              </div>
+              <button onClick={() => removerCusto(c.id)} className="text-rose-400 cursor-pointer shrink-0">🗑</button>
+            </div>
+          ))}
+          {custos.length === 0 && <p className="text-sm text-slate-400">Nenhum custo cadastrado.</p>}
+        </div>
+        <div className="grid sm:grid-cols-3 gap-2">
+          <input className="sm:col-span-2 rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" placeholder="Nome do custo" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+          <div className="flex gap-2">
+            <input type="number" step="0.01" className="flex-1 rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" placeholder="Valor" value={novoValor} onChange={(e) => setNovoValor(e.target.value)} />
+            <button onClick={adicionarCusto} className="px-3 py-2 rounded-xl font-bold text-white text-sm cursor-pointer shrink-0" style={{ background: BRAND.azul }}>+ Adicionar</button>
+          </div>
+        </div>
+      </div>
+      <p className="text-xs text-slate-400">💡 MRR e saldo são a foto de agora (assinaturas ativas hoje) — não existe histórico de MRR por dia ainda pra filtrar por período. O anúncio (Meta Ads) vai virar automático e sensível ao período assim que o acesso à API da Meta for configurado.</p>
+    </div>
+  );
+}
+
+/* ============================================================
    TROCAR SENHA (emergência — quando o e-mail de recuperação falha)
 ============================================================ */
 // Precisa bater com o segredo ADMIN_RESET_SECRET configurado nas
@@ -759,9 +968,10 @@ function AdminApp() {
           <button onClick={() => setAba("relatorios")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "relatorios" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Relatórios</button>
           <button onClick={() => setAba("configuracoes")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "configuracoes" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Configurações</button>
           <button onClick={() => setAba("central")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "central" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>Central de Controle</button>
+          <button onClick={() => setAba("custos")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "custos" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>💰 Custos &amp; Balanço</button>
           <button onClick={() => setAba("senha")} className="px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold cursor-pointer" style={aba === "senha" ? { background: BRAND.azul, color: "#fff" } : { background: "#fff", color: BRAND.tinta }}>🔑 Trocar Senha</button>
         </div>
-        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : aba === "central" ? <CentralControle /> : aba === "senha" ? <TrocarSenhaTab /> : <ConfiguracoesTab />}
+        {aba === "decoradoras" ? <DecoradorasLista /> : aba === "relatorios" ? <Relatorios /> : aba === "central" ? <CentralControle /> : aba === "custos" ? <CustosBalancoTab /> : aba === "senha" ? <TrocarSenhaTab /> : <ConfiguracoesTab />}
       </div>
     </div>
   );
